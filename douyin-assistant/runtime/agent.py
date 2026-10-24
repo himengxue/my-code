@@ -59,43 +59,113 @@ def global_args(args):
     return ['--port','19323'] + (['--headed'] if args.headed else [])
 
 
+class UserVerificationRequired(ValueError):
+    """The user must handle the platform's verification in the browser."""
+
+
 def verify_page(page, expected_url=None):
     info = page.evaluate(r'''(() => {
       const visible=e=>!!(e.offsetWidth||e.offsetHeight||e.getClientRects().length);
       const body=(document.body?.innerText||'');
       const challenge=Array.from(document.querySelectorAll('iframe,[role="dialog"],[id*="captcha"],[class*="captcha"]')).filter(visible).some(e=>{
         if(e.tagName==='IFRAME')return /captcha|verify/.test(e.getAttribute('src')||'');
-        return /拖动滑块|完成下方验证|完成安全验证|访问过于频繁|操作过于频繁/.test(e.innerText||'');
+        return /拖动滑块|完成下方验证|完成安全验证|访问过于频繁|操作过于频繁|接收短信验证码|请输入验证码|身份验证/.test(e.innerText||'');
       });
-      return {url:location.href,title:document.title,text:body.slice(0,16000),verification_ui:challenge||(body.length<600&&/访问过于频繁|账号异常|拖动滑块/.test(body))};
+      // Some verification overlays have no dialog role. Require both a visible
+      // code input and a short verification heading; never read the code value.
+      const codeInput=Array.from(document.querySelectorAll('input')).some(e=>visible(e)&&/验证码/.test([e.getAttribute('placeholder'),e.getAttribute('aria-label')].filter(Boolean).join(' ')));
+      const verificationHeading=Array.from(document.querySelectorAll('h1,h2,h3,div,span')).some(e=>{
+        const text=(e.innerText||'').trim();
+        return visible(e)&&text.length<100&&/接收短信验证码|完成安全验证|验证身份|身份验证/.test(text);
+      });
+      return {url:location.href,title:document.title,text:body.slice(0,16000),verification_ui:challenge||(codeInput&&verificationHeading)||(body.length<600&&/访问过于频繁|账号异常|拖动滑块/.test(body))};
     })()''') or {}
     if info.get('verification_ui'):
-        raise ValueError('页面出现验证或风控提示，请用户在该浏览器处理后继续')
+        raise UserVerificationRequired('页面出现验证或风控提示；停止操作，请用户在该浏览器处理，随后先核对远端结果，勿自动重发')
     if expected_url and expected_url.split('?')[0] != info.get('url','').split('?')[0]:
         raise ValueError('页面已经离开任务目标，未发送')
     return info
 
 
+def match_creator_cards(cards, profile_items):
+    """Join visible creator cards to the explicit self-post list; fail on ambiguity."""
+    norm = lambda text: ' '.join(str(text).split())
+    result = []
+    used = set()
+    for card in cards:
+        title = norm(card.get('title', ''))
+        matches = [item for item in profile_items if title and title in norm(item.get('title', ''))]
+        if len(matches) != 1 or matches[0]['id'] in used:
+            continue
+        item = matches[0]
+        used.add(item['id'])
+        result.append({**item, 'title': card['title'], 'platform_status': card.get('platform_status', ''), 'ownership_evidence': 'creator_card_and_self_post_list'})
+    return result
+
+
 def list_own_videos(page, db, limit):
-    page.navigate('https://creator.douyin.com/creator-micro/content/manage')
+    manage_url = 'https://creator.douyin.com/creator-micro/content/manage'
+    page.navigate(manage_url)
     page.wait_for_load(15)
-    info = verify_page(page)
-    if 'creator.douyin.com/creator-micro/content/manage' not in info.get('url','') or '扫码登录' in info.get('text',''):
-        return {'ok':False,'error':{'code':'not_logged_in','message':'请登录创作者中心'}}
-    rows = page.evaluate(r'''(() => {
-      const out=[],seen=new Set();
-      for(const a of document.querySelectorAll('a[href]')){
-        if(!(a.offsetWidth||a.offsetHeight||a.getClientRects().length))continue;
-        const u=new URL(a.href),m=u.pathname.match(/\/(video|note)\/(\d+)/);
-        const id=m?.[2]||u.searchParams.get('item_id')||u.searchParams.get('video_id');
-        if(!id||!/^\d+$/.test(id)||seen.has(id))continue;seen.add(id);
-        out.push({id,url:m?'https://www.douyin.com/'+m[1]+'/'+id:a.href,title:(a.innerText||a.closest('li')?.innerText||'').trim().slice(0,500)});
-      }return out;
-    })()''') or []
+    cards = []
+    for attempt in range(10):
+        info = verify_page(page)
+        if 'creator.douyin.com/creator-micro/content/manage' not in info.get('url', '') or '扫码登录' in info.get('text', ''):
+            return {'ok': False, 'error': {'code': 'not_logged_in', 'message': '请登录创作者中心'}}
+        cards = page.evaluate(r'''(() => {
+          const visible=e=>!!(e.offsetWidth||e.offsetHeight||e.getClientRects().length);
+          return Array.from(document.querySelectorAll('[class*="video-card-content-"]')).filter(visible).map(e=>({
+            title:(e.querySelector('[class*="info-title-text-"]')?.innerText||'').trim(),
+            platform_status:(e.querySelector('[class*="info-status-"]')?.innerText||'').trim()
+          })).filter(e=>e.title);
+        })()''') or []
+        rows = page.evaluate(r'''(() => {
+          const out=[],seen=new Set();
+          for(const a of document.querySelectorAll('a[href]')){
+            if(!(a.offsetWidth||a.offsetHeight||a.getClientRects().length))continue;
+            const u=new URL(a.href),m=u.pathname.match(/\/(video|note)\/(\d+)/);
+            const id=m?.[2]||u.searchParams.get('item_id')||u.searchParams.get('video_id');
+            if(!id||!/^\d+$/.test(id)||seen.has(id))continue;seen.add(id);
+            out.push({id,url:m?'https://www.douyin.com/'+m[1]+'/'+id:a.href,title:(a.innerText||a.closest('li')?.innerText||'').trim().slice(0,500)});
+          }return out;
+        })()''') or []
+        if rows or cards:
+            break
+        if attempt < 9:
+            time.sleep(1)
+    profile_source = None
+    if not rows and cards:
+        # Current creator cards are DIVs without hrefs. Read only the explicit
+        # self-post container, never recommendations, likes, or page-wide links.
+        page.navigate('https://www.douyin.com/user/self?showTab=post')
+        page.wait_for_load(15)
+        profile_items = []
+        for attempt in range(10):
+            own_info = verify_page(page)
+            if '/user/self' not in own_info.get('url', '') or '扫码登录' in own_info.get('text', ''):
+                break
+            profile_items = page.evaluate(r'''(() => {
+              const visible=e=>!!(e.offsetWidth||e.offsetHeight||e.getClientRects().length);
+              const root=Array.from(document.querySelectorAll('[data-e2e="user-post-list"]')).find(visible);
+              if(!root)return [];
+              const seen=new Set(),out=[];
+              for(const a of root.querySelectorAll('a[href]')){
+                if(!visible(a))continue;
+                const u=new URL(a.href),m=u.pathname.match(/^\/(video|note)\/(\d+)$/);
+                if(u.hostname!=='www.douyin.com'||!m||seen.has(m[2]))continue;
+                seen.add(m[2]);out.push({id:m[2],url:'https://www.douyin.com/'+m[1]+'/'+m[2],title:(a.innerText||'').trim()});
+              }return out;
+            })()''') or []
+            if profile_items:
+                break
+            if attempt < 9:
+                time.sleep(1)
+        rows = match_creator_cards(cards, profile_items)
+        profile_source = own_info.get('url')
     for row in rows:
-        db.observe('own-video:'+row['id'], {'video':row,'source':info['url']})
-    return {'ok':bool(rows),'data':{'items':rows[:limit],'loaded_count':len(rows),'scope':'当前已加载作品','target_id':page.target_id},
-            **({} if rows else {'error':{'code':'ui_changed','message':'当前作品列表没有可识别链接；使用 browser snapshot 检查页面，不将空解析当成没有作品。'}})}
+        db.observe('own-video:' + row['id'], {'video': row, 'source': info['url'], 'profile_source': profile_source})
+    return {'ok': bool(rows), 'data': {'items': rows[:limit], 'loaded_count': len(rows), 'scope': '当前已加载作品；无链接卡片与本人作品容器交叉核对', 'target_id': page.target_id, 'creator_card_count': len(cards), 'profile_source': profile_source},
+            **({} if rows else {'error': {'code': 'ui_changed', 'message': '当前作品列表没有可安全核对的链接；不将空解析当成没有作品。'}})}
 
 
 def require_own(db, video_id):
@@ -129,6 +199,12 @@ def prepare_video(args, db):
     return {'ok':bool(result.get('success')),'job_id':job['id'],'result':result,'next':'核对 AI 声明、公开可见、封面及完整文案后运行 video publish --job ...；已授权范围内由 AI 完成核对。'}
 
 
+def form_value_matches(expected, values):
+    # Douyin's contenteditable inserts a trailing U+200B sentinel.
+    # Ignore only that terminal editor marker, retaining internal content.
+    return any(str(value).strip().rstrip('\u200b').strip() == expected.strip() for value in values)
+
+
 def publish_video(args, db):
     authorized('video')
     job = db.get(args.job)
@@ -146,19 +222,20 @@ def publish_video(args, db):
         return {'ok':False,'data':{'job_id':args.job,'validation':validation,'clicked':False}}
     fields=page.evaluate("({values:Array.from(document.querySelectorAll('input,textarea,[contenteditable=\"true\"]')).filter(e=>e.offsetWidth||e.offsetHeight||e.getClientRects().length).map(e=>(e.value||e.innerText||'').trim()),video:document.querySelector('video')?.currentSrc || document.querySelector('video')?.src || ''})") or {}
     expected_caption=Path(p['caption_file']).read_text(encoding='utf-8-sig').strip()
-    if p['title'].strip() not in fields.get('values',[]) or expected_caption not in fields.get('values',[]):
+    if not form_value_matches(p['title'], fields.get('values',[])) or not form_value_matches(expected_caption, fields.get('values',[])):
         raise ValueError('当前表单标题/简介与此任务不一致，未发布')
     if p.get('video_marker') and fields.get('video') != p['video_marker']:
         raise ValueError('当前表单的视频预览发生变化，需要重新准备和核对')
     settings = page.evaluate(r'''(() => {
       const visible=e=>!!(e.offsetWidth||e.offsetHeight||e.getClientRects().length);
-      const nodes=Array.from(document.querySelectorAll('label,[role="radio"],[role="checkbox"],[role="switch"],span,div')).filter(visible);
+      const nodes=Array.from(document.querySelectorAll('label,[role="radio"],[role="checkbox"],[role="switch"],span,div,section')).filter(visible);
       const ai=nodes.some(e=>{const t=(e.innerText||'').replace(/\s/g,'');
         if(t.length>160)return false;
         const selected=e.getAttribute('aria-checked')==='true'||e.querySelector('input:checked,[aria-checked="true"]');
         return /内容由AI生成|作品由AI生成/.test(t)&&(selected||(t.includes('自主声明')&&t.length<100));});
       const publicVisibility=nodes.some(e=>{const t=(e.innerText||'').replace(/\s/g,'');return t.length<120&&/谁可以看|可见范围/.test(t)&&t.includes('公开')&&!/私密|仅自己|朋友/.test(t);})||nodes.some(e=>(e.innerText||'').trim()==='公开'&&(e.getAttribute('aria-checked')==='true'||e.querySelector('input:checked')));
-      return {ai,publicVisibility};
+      const dialogOpen=Array.from(document.querySelectorAll('[role="dialog"]')).some(visible);
+      return {ai:ai&&!dialogOpen,publicVisibility,dialogOpen};
     })()''') or {}
     if not settings.get('ai') or not settings.get('publicVisibility'):
         return {'ok':False,'error':{'code':'settings_unverified','message':'请通过 browser snapshot/click 设置并核对 AI 声明与公开可见；未点击发布'},'settings':settings,'job_id':args.job}
@@ -219,10 +296,10 @@ def prepare_reply(args, db):
     page=rt.connect(target=saved['target_id'])
     verify_page(page,saved['url'])
     selected=rt.open_reply(page,saved)
-    if not selected or not selected.get('ok') or not rt.reply_target_visible(page,saved.get('author')):
+    if not selected or not selected.get('ok') or not rt.reply_target_visible(page,saved.get('author'),saved.get('key')):
         return {'ok':False,'error':{'code':'reply_target_unverified','message':'没有明确进入该作者的回复模式；未发送'},'job_id':job['id']}
     from douyin.interact import _prepare_comment
-    filled=_prepare_comment(page,text)
+    filled=_prepare_comment(page,text,adapter=rt.reply_adapter())
     if filled.get('ok'):
         db.ready(job['id'],{'target_id':page.target_id,'page_url':saved['url']})
     return {'ok':bool(filled.get('ok')),'job_id':job['id'],'result':filled}
@@ -235,27 +312,41 @@ def send_reply(args, db):
         raise ValueError('回复任务未就绪或已有提交记录')
     p=job['payload']; saved=p['comment']; require_own(db,saved['video_id'])
     page=rt.connect(target=p['target_id']); verify_page(page,p['page_url'])
-    if not rt.reply_target_visible(page,saved.get('author')):
+    if not rt.reply_target_visible(page,saved.get('author'),saved.get('key')):
         raise ValueError('回复对象标记已变化，未发送')
     from douyin.interact import _prepare_comment, _submit_comment
-    if not _prepare_comment(page,p['text']).get('ok'):
+    if not _prepare_comment(page,p['text'],adapter=rt.reply_adapter()).get('ok'):
         raise ValueError('编辑器中的回复正文未核对通过')
-    query=r'''(() => {const r=document.querySelector('[data-dy-agent-reply-root="current"]');return r?(r.innerText||''):null;})()'''
-    before=page.evaluate(query) or ''
+    before=rt.reply_thread_state(page)
     db.dispatch(args.job)
+    clicked=None
     try:
-        sent=_submit_comment(page,p['text'])
-        result={'clicked':sent.get('ok'),'effect':'unconfirmed','retry_safe':False}
+        sent=_submit_comment(page,p['text'],adapter=rt.reply_adapter())
+        clicked=bool(sent.get('ok'))
+        result={'clicked':clicked,'effect':'unconfirmed','retry_safe':False}
         for _ in range(5):
             time.sleep(1)
-            after=page.evaluate(query) or ''
-            if after.count(p['text'])>before.count(p['text']):
-                result.update(effect='confirmed',evidence=after[-2000:])
+            verify_page(page,p['page_url'])
+            after=rt.reply_thread_state(page)
+            if clicked and reply_observed(before,after,p['text']):
+                # The site may optimistically render a reply before accepting it.
+                # Without a receipt or independent read bound to this thread,
+                # preserve uncertain state and prohibit automatic redispatch.
+                result.update(evidence=after['text'][-2000:],confirmation_scope='current_page_only',needs_independent_verification=True)
                 break
+    except UserVerificationRequired as exc:
+        result={'clicked':clicked,'effect':'blocked','retry_safe':False,'needs_user_verification':True,'error':str(exc)}
     except Exception as exc:
-        result={'clicked':None,'effect':'unknown','retry_safe':False,'error':str(exc)}
+        result={'clicked':clicked,'effect':'unknown','retry_safe':False,'error':str(exc)}
     final=db.finish(args.job,result['effect']=='confirmed',result)
     return {'ok':final['status']=='confirmed','data':{'job_id':args.job,'status':final['status'],**result}}
+
+
+def reply_observed(before, after, text):
+    """A disabled/unsent editor is never evidence of a posted reply."""
+    return bool(text and before.get('valid') and after.get('valid')
+                and after.get('editors_empty')
+                and after.get('text','').count(text)>before.get('text','').count(text))
 
 
 def build_parser():
@@ -337,6 +428,8 @@ def main():
     sys.stdout.reconfigure(encoding='utf-8')
     try:
         result=run(build_parser().parse_args())
+    except UserVerificationRequired as exc:
+        result={'ok':False,'error':{'code':'needs_user_verification','message':str(exc)},'needs_user_verification':True,'retry_safe':False}
     except Exception as exc:
         result={'ok':False,'error':{'code':'execution_error','message':str(exc),'hint':'若已有提交记录，先核对网页结果，勿重复发送。'}}
     print(json.dumps(result,ensure_ascii=False))

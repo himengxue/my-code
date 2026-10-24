@@ -579,6 +579,7 @@ def _submit_comment(page, comment: str, adapter: PlatformAdapter | None = None) 
                 ? (input.innerText || input.textContent || '')
                 : (input.value || '');
               if (current !== text) return {{ok:false, reason:'comment-text-not-present'}};
+              const replyRoot = input.closest('[data-dy-agent-reply-root="current"]');
               const candidates = [];
               const seen = new Set();
               let root = input;
@@ -593,6 +594,7 @@ def _submit_comment(page, comment: str, adapter: PlatformAdapter | None = None) 
                 }}
               }}
               const target = candidates.find(el => {{
+                if (replyRoot && !replyRoot.contains(el)) return false;
                 if (!visible(el) || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
                 const style = getComputedStyle(el);
                 if (style.pointerEvents === 'none' || Number(style.opacity || 1) < 0.5) return false;

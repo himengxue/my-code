@@ -10,13 +10,14 @@ cli=runtime.upstream
 
 class SecurityTests(unittest.TestCase):
  def test_headless_has_no_security_disabling_flags(self):
-  for uid in (0,1000):
-   with self.subTest(uid=uid), patch.object(os,'geteuid',return_value=uid), patch.dict(os.environ,{'DOUYIN_CHROME_NO_SANDBOX':'1'}):
-    flags=launcher._prepare_launch_cmd('/usr/bin/chromium',19323,True,'/isolated-profile')
-    self.assertIn('--headless=new',flags)
-    self.assertIn('--remote-debugging-address=127.0.0.1',flags)
-    self.assertNotIn('--no-sandbox',flags)
-    self.assertFalse(any('AutomationControlled' in flag for flag in flags))
+  for platform in ('linux','win32'):
+   for uid in (0,1000):
+    with self.subTest(platform=platform,uid=uid), patch.object(sys,'platform',platform), patch.object(os,'geteuid',return_value=uid,create=True), patch.dict(os.environ,{'DOUYIN_CHROME_NO_SANDBOX':'1'}):
+     flags=launcher._prepare_launch_cmd('/usr/bin/chromium',19323,True,'/isolated-profile')
+     self.assertIn('--headless=new',flags)
+     self.assertIn('--remote-debugging-address=127.0.0.1',flags)
+     self.assertNotIn('--no-sandbox',flags)
+     self.assertFalse(any('AutomationControlled' in flag for flag in flags))
  def test_risk_immediately_stops_without_connect(self):
   for headed in (True,False):
    for target in (None,'target'):
