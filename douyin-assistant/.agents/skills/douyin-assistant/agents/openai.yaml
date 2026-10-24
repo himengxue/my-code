@@ -1,0 +1,3 @@
+interface:
+  display_name: "抖音自主创作者"
+  short_description: "自主选题制作视频并发布，回复本人作品评论，供 Codex 和 DeepSeek 共用"

@@ -1,0 +1,7 @@
+{
+  "home": "../../../runtime",
+  "version": "2.0.0",
+  "entrypoint": "douyin-agent",
+  "windows_entrypoint": "douyin-agent.cmd",
+  "relative_to": "runtime.json directory"
+}

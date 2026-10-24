@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export DOUYIN_AGENT_HOME="$ROOT/data"
+export HOME="$ROOT/data/home"
+export XDG_CACHE_HOME="$ROOT/data/cache"
+mkdir -p "$HOME" "$XDG_CACHE_HOME"
+# Optional CHROME_BIN is inherited; normal browser discovery remains available.
+exec "$ROOT/.venv/bin/python" "$ROOT/agent.py" "$@"
