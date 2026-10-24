@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "mode": "not_configured",
+  "topic_selection": "autonomous",
+  "make_original_videos": true,
+  "publish_videos": false,
+  "reply_to_own_video_comments": false,
+  "require_per_post_approval": false,
+  "require_per_reply_approval": false,
+  "topic_direction": "承接账号历史定位，或自主选择原创短片/实用演示主题；不编造主人的亲身经历。",
+  "default_visibility": "public",
+  "max_videos_per_run": 1,
+  "max_replies_per_run": 5,
+  "extra_spending_budget": 0,
+  "scheduled_runs": false,
+  "authorization": null
+}
