@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Optional test of an explicitly supplied, already-installed official provider.
 // No model API, DSH credentials, user skill roots, or browser access is used.
-import { copyFile, mkdir, mkdtemp, readFile } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, readFile } from 'node:fs/promises';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
@@ -21,6 +21,7 @@ const repository = resolve(project, '..');
 const fixture = await mkdtemp(join(temporaryRoot, 'dsh-discovery-'));
 const whole = join(fixture, '整仓 有空格');
 const standalone = join(fixture, '独立包 有空格');
+const noGitPackage = join(fixture, '独立解压包 无Git');
 const canonical = '.agents/skills/douyin-assistant/SKILL.md';
 async function copy(source, destination) {
   await mkdir(dirname(destination), { recursive: true });
@@ -29,7 +30,8 @@ async function copy(source, destination) {
 await copy(join(repository, canonical), join(whole, canonical));
 await copy(join(project, canonical), join(whole, 'douyin-assistant', canonical));
 await copy(join(project, canonical), join(standalone, canonical));
-for (const destination of [join(whole, 'douyin-assistant'), standalone]) {
+await copy(join(project, canonical), join(noGitPackage, canonical));
+for (const destination of [join(whole, 'douyin-assistant'), standalone, noGitPackage]) {
   for (const file of ['.agents/skills/douyin-assistant/runtime.json', 'runtime/douyin-agent', 'runtime/douyin-agent.cmd']) {
     await copy(join(project, file), join(destination, file));
   }
@@ -37,6 +39,18 @@ for (const destination of [join(whole, 'douyin-assistant'), standalone]) {
 // Empty .git directories model only the documented discovery boundary.
 await mkdir(join(whole, '.git'));
 await mkdir(join(standalone, '.git'));
+// This fixture must exercise cwd fallback, not inherit any ancestor Git root.
+for (let directory = noGitPackage; ; directory = dirname(directory)) {
+  let hasGit = false;
+  try {
+    await lstat(join(directory, '.git'));
+    hasGit = true;
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  assert.equal(hasGit, false, 'The no-Git fixture requires --temp-dir outside every Git root');
+  if (dirname(directory) === directory) break;
+}
 const SkillFileSystem = await import(pathToFileURL(providerPath).href);
 const { default: SkillRegistry } = await import(pathToFileURL(registryPath).href);
 const { Context } = await import(pathToFileURL(cordisPath).href);
@@ -52,6 +66,7 @@ try {
     ['whole_repository', whole, join(whole, canonical)],
     ['nested_cwd', join(whole, 'douyin-assistant'), join(whole, canonical)],
     ['standalone_package', standalone, join(standalone, canonical)],
+    ['standalone_no_git', noGitPackage, join(noGitPackage, canonical)],
   ]) {
     const rows = await ctx.skills.list({ cwd });
     const candidates = rows.filter(row => row.name === 'douyin-assistant');
@@ -66,7 +81,8 @@ try {
     assert.equal(resolve(loaded.resourceBase.path), resolve(dirname(expected)));
     checks[`${name}_loaded`] = true;
     let canonicalPath = loaded.path;
-    if (name !== 'standalone_package') {
+    const isStandalone = name.startsWith('standalone_');
+    if (!isStandalone) {
       const link = loaded.content.match(/\[完整技能\]\(([^)]+)\)/)?.[1];
       assert.ok(link);
       canonicalPath = resolve(dirname(loaded.path), link);
@@ -76,7 +92,7 @@ try {
     }
     const binding = JSON.parse(await readFile(join(dirname(canonicalPath), 'runtime.json'), 'utf8'));
     const runtime = resolve(dirname(canonicalPath), binding.home);
-    assert.equal(runtime, name === 'standalone_package' ? join(standalone, 'runtime') : join(whole, 'douyin-assistant/runtime'));
+    assert.equal(runtime, isStandalone ? join(cwd, 'runtime') : join(whole, 'douyin-assistant/runtime'));
     assert.ok((await readFile(join(runtime, binding.windows_entrypoint), 'utf8')).includes('agent.py'));
     checks[`${name}_binding_resolved`] = true;
   }

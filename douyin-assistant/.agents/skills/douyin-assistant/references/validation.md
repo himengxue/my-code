@@ -23,7 +23,7 @@
 | 旧回复成功检测 | failed | 历史 CLI 错报 confirmed，截图显示核验弹窗及未发送草稿；原证据保留并纠正 |
 | 回复安全修复的 DOM 检查 | passed | 12 项 about:blank 检查，含错误目标拒绝、定向输入/发送、隐藏/禁用草稿与无关预览排除及 SMS 停止；无平台评论副作用 |
 | 修复后的真实回复持久成功 | not tested | 未完成用户核验，不再次点击；当前页回显保持 uncertain，需真实回执/独立重读 |
-| DSH 版本/发现组件 | passed | 本机 0.2.0-rc.2；真实 Cordis Context + Registry/FileSystem 的 11 项离线 host-loader 检查通过 |
+| DSH 版本/发现组件 | passed | 本机 0.2.0-rc.2；真实 Cordis Context + Registry/FileSystem 的 14 项离线 host-loader 检查通过，含自身及全部上级无 `.git` 的解压包 |
 | DSH 完整模型会话/沙箱浏览器 | not tested | 未读模型凭证、未调用模型；Windows named-pipe 限制只是待测条件 |
 | Linux 实际浏览器 | blocked | 既有云环境 socket/bwrap 启动约束未解决，未关闭 sandbox；本补丁仅做 Linux 启动参数模拟回归 |
 | macOS、Windows 其他版本 | not tested | 不从单台 Windows 11 结果泛化 |

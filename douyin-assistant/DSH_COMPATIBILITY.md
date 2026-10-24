@@ -32,8 +32,8 @@ JSON 完整返回后仍要检查 `ok`、任务状态与远端证据。非零退�
 ## 2026-10-24 的实测边界
 
 - 本机 `dsh --version` 实际返回 `0.2.0-rc.2`，与文档基线版本不同。
-- 使用已安装 rc.2 的真实 Cordis Context，仅挂载 SkillRegistry 和 SkillFileSystem，以合成文件夹、空用户 skill 根、watch:false 完成 11 项 `ctx.skills.list/get` 检查：整仓、子目录 cwd、独立包、source/path/resourceBase、明确读取 canonical 链接并解析其 runtime 绑定。插件 fiber 在结束时释放。Desktop 内嵌 Node 实际为 24.18.1。测试未加载模型或用户凭证；这是离线 host-loader 测试，不是完整 DSH 会话。
+- 使用已安装 rc.2 的真实 Cordis Context，仅挂载 SkillRegistry 和 SkillFileSystem，以合成文件夹、空用户 skill 根、watch:false 完成 14 项 `ctx.skills.list/get` 检查：整仓、子目录 cwd、带 Git 根的独立包、无 Git 的独立解压包、source/path/resourceBase、明确读取 canonical 链接并解析其 runtime 绑定。无 Git 场景逐级确认自身及全部上级没有 `.git`，直接验证 cwd 作为项目根的分支。插件 fiber 在结束时释放。Desktop 内嵌 Node 实际为 24.18.1。测试未加载模型或用户凭证；这是离线 host-loader 测试，不是完整 DSH 会话。
 - Python 测试覆盖中文/空格路径、绑定不依赖 cwd、缺失入口/绑定报错和入口越界拒绝。
 - DSH 模型会话执行、其沙箱内 Python/浏览器/loopback、Windows named-pipe 能力：**not tested**。不能将这些待测条件写成已发生故障，也不能据此修改 sandbox。
 
-可选组件复现脚本为 `tests/dsh_discovery_smoke.mjs`，接受显式的已安装模块文件路径 `--provider`、`--registry`、`--cordis` 和可写临时目录 `--temp-dir`。它不会安装 DSH，也不把内部测试构造参数当成用户配置入口。测试方法参照官方 [rc.2 filesystem 测试](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/skill/skill-filesystem/tests/skill-filesystem.spec.ts)，未复制其实现。默认 unittest 不需要 DSH。
+可选组件复现脚本为 `tests/dsh_discovery_smoke.mjs`，接受显式的已安装模块文件路径 `--provider`、`--registry`、`--cordis` 和可写临时目录 `--temp-dir`。该临时目录及其上级必须没有 `.git`，否则无 Git 场景明确报错而不跳过。它不会安装 DSH，也不把内部测试构造参数当成用户配置入口。测试方法参照官方 [rc.2 filesystem 测试](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/skill/skill-filesystem/tests/skill-filesystem.spec.ts)，未复制其实现。默认 unittest 不需要 DSH。
