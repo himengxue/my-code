@@ -146,20 +146,61 @@ def open_reply(page, saved):
       const candidates=Array.from(row.querySelectorAll('button,a,span,[role="button"]')).filter(e=>visible(e)&&(e.innerText||'').trim()==='回复');
       const target=candidates.find(e=>!candidates.some(other=>other!==e&&e.contains(other)));
       if(!target)return {ok:false,reason:'reply_button_unavailable'};
-      row.setAttribute('data-dy-agent-reply-root','current');target.click();return {ok:true,author:expected.author};
+      document.querySelectorAll('[data-dy-agent-reply-root]').forEach(e=>{e.removeAttribute('data-dy-agent-reply-root');e.removeAttribute('data-dy-agent-reply-key');});
+      document.querySelectorAll('[data-dy-agent-reply-editor]').forEach(e=>e.removeAttribute('data-dy-agent-reply-editor'));
+      row.setAttribute('data-dy-agent-reply-root','current');row.setAttribute('data-dy-agent-reply-key',expected.key||'');target.click();return {ok:true,author:expected.author};
     })()'''.replace("__SAVED__", json.dumps(saved, ensure_ascii=False)).replace("__SELECTORS__", json.dumps(list(get_default_adapter().selectors.comment_item_selectors)))
     return page.evaluate(expression)
 
 
-def reply_target_visible(page, author):
-    if not author:
+def reply_adapter():
+    """Restrict upstream editor and send discovery to the verified reply card."""
+    from dataclasses import replace
+    base = get_default_adapter()
+    root = '[data-dy-agent-reply-root="current"]'
+    selectors = replace(base.selectors,
+        comment_input_selectors=(root + ' [data-dy-agent-reply-editor="current"]',),
+        comment_submit_selectors=tuple(root + ' ' + selector for selector in base.selectors.comment_submit_selectors))
+    return replace(base, selectors=selectors)
+
+
+def reply_target_visible(page, author, key=None):
+    if not author or not key:
         return False
     return bool(page.evaluate(r'''(() => {
-      const author=__AUTHOR__;
-      const visible=e=>!!(e.offsetWidth||e.offsetHeight||e.getClientRects().length);
-      const fields=Array.from(document.querySelectorAll('textarea,input,[contenteditable="true"]')).filter(visible);
-      return fields.some(e=>{
-        const label=[e.getAttribute('placeholder'),e.getAttribute('data-placeholder'),e.getAttribute('aria-label'),e.parentElement?.innerText].filter(Boolean).join(' ');
-        return label.includes('回复')&&label.includes(author);
-      });
-    })()'''.replace("__AUTHOR__", json.dumps(author, ensure_ascii=False))))
+      const author=__AUTHOR__,key=__KEY__;
+      const visible=e=>!!(e&&(e.offsetWidth||e.offsetHeight||e.getClientRects().length));
+      const root=document.querySelector('[data-dy-agent-reply-root="current"]');
+      if(!visible(root)||root.getAttribute('data-dy-agent-reply-key')!==key)return false;
+      const authorNode=root.querySelector('a[href*="/user/"]');
+      if(!authorNode||(authorNode.innerText||'').trim()!==author)return false;
+      const fields=Array.from(root.querySelectorAll('textarea,[contenteditable="true"]')).filter(visible);
+      if(fields.length!==1)return false;
+      const field=fields[0];
+      const described=(field.getAttribute('aria-describedby')||'').split(/\s+/).map(id=>document.getElementById(id)?.innerText||'').join(' ');
+      const label=[field.getAttribute('placeholder'),field.getAttribute('data-placeholder'),field.getAttribute('aria-label'),described].filter(Boolean).join(' ').replace(/\s/g,'');
+      const replying=Array.from(root.querySelectorAll('button,a,span,div')).some(e=>visible(e)&&(e.innerText||'').trim()==='回复中');
+      if(!replying||(!(label===('回复@'+author).replace(/\s/g,'')||label===('回复'+author).replace(/\s/g,''))&&!(field.innerText||field.value||'').trim()))return false;
+      field.setAttribute('data-dy-agent-reply-editor','current');
+      return true;
+    })()'''.replace('__AUTHOR__',json.dumps(author,ensure_ascii=False)).replace('__KEY__',json.dumps(key))))
+
+
+def reply_thread_text(page):
+    return reply_thread_state(page).get('text','')
+
+
+def reply_thread_state(page):
+    """Exclude editors even when verification disables contenteditable."""
+    return page.evaluate(r'''(() => {
+      const roots=document.querySelectorAll('[data-dy-agent-reply-root="current"]');
+      if(roots.length!==1)return {valid:false,text:'',editors_empty:false};
+      const root=roots[0];
+      const editorSelector='[data-dy-agent-reply-editor],input,textarea,[contenteditable],[role="textbox"],[role="combobox"]';
+      const editors=Array.from(root.querySelectorAll(editorSelector));
+      const empty=editors.every(e=>!(e.value||e.textContent||'').trim());
+      const copy=root.cloneNode(true);
+      copy.querySelectorAll(editorSelector).forEach(e=>e.remove());
+      return {valid:true,text:copy.textContent||'',editors_empty:empty};
+    })()''') or {'valid':False,'text':'','editors_empty':False}
+

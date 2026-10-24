@@ -115,7 +115,8 @@ def find_chrome() -> str | None:
 
 
 def default_profile_dir(port: int) -> str:
-    return str(Path.home() / ".douyin-skills" / "chrome" / f"profile-{port}")
+    root = Path(os.environ.get("DOUYIN_SKILLS_HOME", Path.home() / ".douyin-skills")).expanduser()
+    return str(root / "chrome" / f"profile-{port}")
 
 
 def _to_windows_path(path: str) -> str:
