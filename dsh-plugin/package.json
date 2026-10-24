@@ -1,0 +1,50 @@
+{
+  "name": "dsh-douyin-assistant",
+  "version": "0.2.0",
+  "description": "抖音自主创作者：把 douyin-assistant skill 与本地执行器打包成 DSH 插件（运行时技能 + 六个工具 + 设置页）。",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "assets",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "plugin",
+    "skill",
+    "douyin"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/himengxue/my-code.git",
+    "directory": "dsh-plugin"
+  },
+  "homepage": "https://github.com/himengxue/my-code/tree/main/dsh-plugin#readme",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "3.18.4"
+  }
+}

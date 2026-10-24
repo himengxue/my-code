@@ -1,0 +1,8 @@
+# dsh-douyin-assistant bundle layer: mounted by `dsh plugin add` / the Plugins
+# page, so a profile gets this row without manual cordis.patch.yml edits.
+#
+# The patch id is part of the contract: it names the loader entry (and the
+# settings/telemetry namespace). Renaming it orphans that identity.
+- insert:
+    - id: douyin-assistant
+      name: dsh-douyin-assistant
